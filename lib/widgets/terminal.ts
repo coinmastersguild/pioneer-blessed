@@ -53,15 +53,27 @@ class Terminal extends Box {
     var cols = 80;
     var rows = 24;
 
-    if (this.width > 0 && this.height > 0) {
-      cols = Math.max(this.width - this.iwidth, 1);
-      rows = Math.max(this.height - this.iheight, 1);
+    // `this.width` walks up the parent chain to compute size; if the
+    // terminal is created before being attached to a rendered tree,
+    // that walk can throw. The first 'render' handler below resizes
+    // to actual dimensions once the layout is known.
+    let w = 0,
+      h = 0;
+    try {
+      w = this.width;
+      h = this.height;
+    } catch (_) {
+      /* parent not ready */
+    }
+    if (w > 0 && h > 0) {
+      cols = Math.max(w - this.iwidth, 1);
+      rows = Math.max(h - this.iheight, 1);
     }
 
     this.term = new XTerminal({
       cols: cols,
       rows: rows,
-      scrollback: 5000,
+      scrollback: options.scrollback ?? 5000,
       allowProposedApi: true,
       // Enhanced color support configuration
       allowTransparency: true,
@@ -79,54 +91,54 @@ class Terminal extends Box {
       wordSeparator: ' ()[]{},"\':;', // Standard word separators
     });
 
-    this.pty = spawn(this.shell, this.args, {
-      cols: cols,
-      rows: rows,
-      cwd: process.env.HOME,
-    });
-
-    this.term.onData(d => this.pty.write(d));
-
     // Store raw ANSI sequences with line tracking for tmux-like passthrough
     this._rawAnsiBuffer = '';
 
-    this.pty.onData(d => {
-      const data = d.toString();
+    // noPty mode: skip the shell PTY entirely. Caller pushes content
+    // directly via .write() — useful for log/output panes that want
+    // xterm.js scrollback + selection without spawning a process.
+    if (!options.noPty) {
+      this.pty = spawn(this.shell, this.args, {
+        cols: cols,
+        rows: rows,
+        cwd: process.env.HOME,
+      });
 
-      // Store raw ANSI data - keep it organized by recent output
-      this._rawAnsiBuffer = data; // Only keep the most recent chunk for direct replay
+      this.term.onData(d => this.pty.write(d));
 
-      // Send to xterm.js for structural processing
-      this.term.write(d);
-    });
+      this.pty.onData(d => {
+        const data = d.toString();
+        this._rawAnsiBuffer = data;
+        this.term.write(d);
+      });
 
-    if (
-      this.screen.program.input &&
-      typeof this.screen.program.input.on === 'function'
-    ) {
-      this.screen.program.input.on(
-        'data',
-        (this._onData = (data: any) => {
-          if (this.screen.focused === this) {
-            this.term.input(data.toString());
-          }
-        })
-      );
-    }
-
-    this.pty.onData(() => {
-      // Auto-scroll to bottom when new content arrives
-      if (this.term && typeof this.term.scrollToBottom === 'function') {
-        this.term.scrollToBottom();
+      if (
+        this.screen.program.input &&
+        typeof this.screen.program.input.on === 'function'
+      ) {
+        this.screen.program.input.on(
+          'data',
+          (this._onData = (data: any) => {
+            if (this.screen.focused === this) {
+              this.term.input(data.toString());
+            }
+          })
+        );
       }
-      setTimeout(() => this.screen.render(), 16);
-    });
+
+      this.pty.onData(() => {
+        if (this.term && typeof this.term.scrollToBottom === 'function') {
+          this.term.scrollToBottom();
+        }
+        setTimeout(() => this.screen.render(), 16);
+      });
+    }
 
     this.on('resize', () => {
       var cols = Math.max(this.width - this.iwidth, 1);
       var rows = Math.max(this.height - this.iheight, 1);
       this.term.resize(cols, rows);
-      this.pty.resize(cols, rows);
+      if (this.pty) this.pty.resize(cols, rows);
     });
 
     this.once('render', () => {
@@ -134,7 +146,7 @@ class Terminal extends Box {
       var actualRows = Math.max(this.height - this.iheight, 1);
       if (actualCols !== cols || actualRows !== rows) {
         this.term.resize(actualCols, actualRows);
-        this.pty.resize(actualCols, actualRows);
+        if (this.pty) this.pty.resize(actualCols, actualRows);
       }
     });
 

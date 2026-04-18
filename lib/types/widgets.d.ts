@@ -269,6 +269,8 @@ export interface TerminalOptions extends BoxOptions {
   term?: string;
   handler?: Function;
   filter?: Function;
+  noPty?: boolean;
+  scrollback?: number;
 }
 
 export interface TerminalInterface extends BoxInterface {

@@ -652,6 +652,10 @@ Screen.prototype._listenMouse = function (el) {
   if (this.options.sendFocus) {
     this.program.setMouse({ sendFocus: true }, true);
   }
+  // FIX: enableMouse() sends the terminal-mode codes but does NOT
+  // wake up the byte parser. Without this, mouse bytes arrive on
+  // stdin but never get parsed into 'mouse' events on the program.
+  this.program.bindMouse();
 
   this.on('render', function () {
     self._needsClickableSort = true;
@@ -1331,7 +1335,7 @@ Screen.prototype.draw = function (start, end) {
         }
 
         if (clr && neq) {
-          (lx = -1), (ly = -1);
+          ((lx = -1), (ly = -1));
           if (data !== attr) {
             out += this.codeAttr(data);
             attr = data;
@@ -1405,7 +1409,7 @@ Screen.prototype.draw = function (start, end) {
         } else {
           out += this.tput.cup(y, x);
         }
-        (lx = -1), (ly = -1);
+        ((lx = -1), (ly = -1));
       }
       o[x][0] = data;
       o[x][1] = ch;
